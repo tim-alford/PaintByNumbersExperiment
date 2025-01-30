@@ -1,13 +1,20 @@
 // vim: ts=2
 package com.ocka.paint.model;
+import com.ocka.paint.controller.*;
+import java.awt.image.*;
 import java.util.*;
 public class KMeans {
 	private Integer size; // number of clusters	
 	private List<Cluster> clusters;
 	private Boolean converged = false;
-	public KMeans(Integer size){
+	private List<ImageStateObserver> observers;
+	private int width, height;
+	public KMeans(Integer size, int width, int height, List<ImageStateObserver> observers){
 		this.size = size;
 		this.clusters = new ArrayList<>(size);
+		this.observers = observers;
+		this.width = width;
+		this.height = height;
 	}
 	public List<Cluster> getClusters(){ return clusters; }
 	public Boolean isConverged(){
@@ -48,6 +55,27 @@ public class KMeans {
 			i++;
 		}
 	}
+	private BufferedImage getImageState(){
+		BufferedImage image = new BufferedImage(this.width, this.height, BufferedImage.TYPE_INT_ARGB);
+		for(Cluster c: this.clusters){
+			int pixel = c.getSeedColor().getRGB();
+			for(Observation o: c.getObservations()){
+				int x = o.getX(), y = o.getY();
+				image.setRGB(x, y, pixel);
+			}
+		}
+		return image;
+	}
+	private void onIterationComplete(){
+		BufferedImage i = getImageState(); // get copy of image after this current iteration
+		for(ImageStateObserver o: this.observers){
+			try{
+				o.onImageChanged(i);
+			}catch(Exception x){
+				throw new RuntimeException("Failed to write image", x);
+			}
+		}
+	}
 	public void run(List<Observation> obs, Integer limit){
 		Integer iterations = 0;
 		Boolean trace = false;
@@ -70,6 +98,7 @@ public class KMeans {
 			}
 			for(Cluster c: this.clusters)
 				c.updateCounts();
+			onIterationComplete();
 			Boolean converged = true;
 			for(Cluster c: this.clusters)
 				converged = converged && c.isConverged();

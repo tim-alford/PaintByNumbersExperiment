@@ -1,13 +1,31 @@
 // vim: ts=2
 package com.ocka.paint.model;
 import java.util.*;
+import java.awt.Color;
 public class Cluster {
+	private static final Color[] SEED_COLOURS = new Color[]{
+		new Color(15732500),
+		new Color(16035339),
+		new Color(15987723),
+		new Color(7665416),
+		new Color(3590455),
+		new Color(2546087),
+		new Color(693749),
+		new Color(741108),
+		new Color(7146994),
+		new Color(12589287),
+		new Color(15797988),
+		new Color(11358881),
+		new Color(15797842),
+		new Color(15899917)
+	};
 	private Integer id;
 	private Integer previousCount;
 	private Integer currentCount;
 	private Double minimum;
 	private Double maximum;
 	private Double mean;
+	private Color seed; // for tracking changes in cluster shape/size
 	private List<Observation> obs;
 	public Cluster(Integer id, Double mean){
 		this.id = id;
@@ -15,6 +33,10 @@ public class Cluster {
 		this.obs = new LinkedList<>();
 		this.currentCount = null;
 		this.previousCount = null;
+		this.seed = SEED_COLOURS[id-1]; // id is one indexed
+	}
+	public Color getSeedColor(){
+		return this.seed;
 	}
 	@Override
 	public String toString(){

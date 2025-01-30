@@ -1,6 +1,8 @@
 // vim: ts=2
+
 package com.ocka.paint;
 import com.ocka.paint.model.*;
+import com.ocka.paint.controller.*;
 import com.ocka.paint.image.*;
 import java.awt.image.*;
 import java.awt.Color;
@@ -11,8 +13,30 @@ import java.util.*;
 public class Main {
 	private BufferedImage image;	
 	private int nClusters;
+	private List<ImageStateObserver> observers;
 	private Main(){
 		this.image = null;
+		this.observers = new LinkedList<>();
+		this.observers.add(new FrameGenerator());
+	}
+	private void doImageChanged(BufferedImage image){
+		for(ImageStateObserver o: this.observers){
+			try{
+				o.onImageChanged(image);
+			}catch(Exception x){
+				throw new RuntimeException("Failed to write image frame", x);
+			}
+		}
+	}
+	private void doImageChanged(int[][] matrix){
+		for(ImageStateObserver o: this.observers){
+			try{
+				BufferedImage i = getImage(matrix);
+				o.onImageChanged(i);
+			}catch(Exception x){
+				throw new RuntimeException("Failed to write image frame", x);
+			}
+		}
 	}
 	public void setup(String[] args) throws Exception {
 		String path = args[0];
@@ -23,6 +47,7 @@ public class Main {
 		}
 		this.image = ImageIO.read(f);	
 		this.nClusters = Integer.parseInt(nClusters);
+		//doImageChanged(this.image);
 	}
 	private double removeAlpha(int rgb){
 		return (double) (rgb & (int)(0x00FFFFFF));
@@ -31,7 +56,7 @@ public class Main {
 		int width = this.image.getWidth(null);
 		int height = this.image.getHeight(null);
 		int pixels[] = this.image.getRGB(0, 0, width, height, null, 0, width);
-		boolean useReal = false;
+		BufferedImage greyImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 		boolean useGrey = true;
 		List<Observation> obs = new ArrayList<>(pixels.length);
 		GreyScale g = new GreyScale();
@@ -40,67 +65,16 @@ public class Main {
 			int offset = i * width;
 			for(int j = 0; j < width; j++){
 				int p = pixels[offset+j];
-				if(useReal){
-					// just get rid off alpha
-					// we dont need to determine colours
-					p = p & 0x00FFFFFF;
-					obs.add(new Observation(p, j, i));
-				}
-				if(useGrey){
-					int index = g.getGreyScaleIndex(p);
-					int greyPixel = greyTable[index];
-					obs.add(new Observation(greyPixel, j, i));
-				}
+				int index = g.getGreyScaleIndex(p);
+				int greyPixel = greyTable[index];
+				obs.add(new Observation(greyPixel, j, i));
+				greyImage.setRGB(j, i, greyPixel);
 			}
 		}
-		if(useReal){
-			int c = 2;
-			int empty = 0;
-			List<Cluster> colours = new LinkedList<>();
-			colours.add(new Cluster(1,removeAlpha(Color.black.getRGB())));
-			colours.add(new Cluster(2,removeAlpha(Color.blue.getRGB())));
-			colours.add(new Cluster(3,removeAlpha(Color.cyan.getRGB())));
-			colours.add(new Cluster(5,removeAlpha(Color.gray.getRGB())));
-			colours.add(new Cluster(6,removeAlpha(Color.green.getRGB())));
-			colours.add(new Cluster(8,removeAlpha(Color.magenta.getRGB())));
-			colours.add(new Cluster(9,removeAlpha(Color.orange.getRGB())));
-			colours.add(new Cluster(10,removeAlpha(Color.pink.getRGB())));
-			colours.add(new Cluster(11,removeAlpha(Color.red.getRGB())));
-			colours.add(new Cluster(13,removeAlpha(Color.yellow.getRGB())));
-			KMeans k = new KMeans(colours.size());
-			System.out.printf("Running with %d observations, %d clusters\n", obs.size(), colours.size());
-			k.init(colours);
-			k.run(obs, 1000);
-			if(k.isConverged()){
-				System.out.printf("Converged\n");
-				int tally = 0;
-				for(Cluster cl: colours){
-					System.out.printf("%s\n", String.valueOf(cl));
-					tally += cl.getObservations().size();
-				}
-				if(tally != obs.size()){
-					throw new Exception("Observation count failed to tally");
-				}
-				BufferedImage paint = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-				for(Cluster cl: colours){
-					int rgb =	(int) Math.floor(cl.getMean());
-					int argb = rgb | 0xFF000000;
-					for(Observation o: cl.getObservations()){
-						int x = o.getX();
-						int y = o.getY();
-						paint.setRGB(x, y, argb);
-					}
-				}
-				ImageIO.write(paint, "png", new File("result.png"));
-			}else{
-				System.out.printf("Didn't converge\n");
-			}	
-			return;
-		}
-		if(useGrey){
+		//doImageChanged(greyImage);
 			long seed = new Random().nextLong();
 			System.out.printf("Using grey scale, seed is %d\n", seed);
-			KMeans k = new KMeans(this.nClusters);
+			KMeans k = new KMeans(this.nClusters, width, height, new LinkedList<>());
 			List<Observation> all = new LinkedList<>();
 			k.init(obs, seed);
 			k.run(obs, 10000);
@@ -134,10 +108,11 @@ public class Main {
 					Set<String> group = findAdjacentPixels(seen, origin, pixel, matrix);
 					groups.add(group);
 				}
+				System.out.printf("Total pixels, %d\n", all.size());
 				System.out.printf("Total seen pixels, %d\n", seen.size());
 				System.out.printf("Total groups, %d\n", groups.size());
 				List<Set<String>> keep = new LinkedList<>();
-				final int MIN_PIXELS = 20;
+				final int MIN_PIXELS = 15;
 				int total = 0;
 				for(Set<String> group: groups){
 					// ignore anything too small
@@ -195,14 +170,14 @@ public class Main {
 						matrix[min][y] = 0x55000000;
 						matrix[max][y] = 0x55000000;
 					}	
-					writeImage(matrix);
+					doImageChanged(matrix);
 				}
+				writeImage(matrix);
 			}else{
 				System.out.printf("Failed to converge\n");
 			}
-		}
 	}
-	private void writeImage(int[][] matrix) throws Exception {
+	private BufferedImage getImage(int[][] matrix) throws Exception {
 		BufferedImage image = new BufferedImage(matrix.length, matrix[0].length, BufferedImage.TYPE_INT_ARGB);
 		for(int i = 0; i < matrix.length; i++){
 			for(int j = 0; j < matrix[i].length; j++){
@@ -211,7 +186,10 @@ public class Main {
 				image.setRGB(i, j, pixel);	
 			}
 		}
-		ImageIO.write(image, "png", new File("grey.png"));
+		return image;
+	}
+	private void writeImage(int[][] matrix) throws Exception {
+		ImageIO.write(getImage(matrix), "png", new File("grey.png"));
 	}
 	private String getStringFromPoint(Point p){
 		return String.format("%d,%d", p.x, p.y);
